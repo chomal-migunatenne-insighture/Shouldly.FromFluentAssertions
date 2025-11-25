@@ -23,7 +23,7 @@ $mapping = @(
     @{ Key = 'Should().BeNull(' ; Value = 'ShouldBeNull(' },
     @{ Key = 'Should().NotBeNull(' ; Value = 'ShouldNotBeNull(' },
     @{ Key = 'Should().BeTrue(' ; Value = 'ShouldBeTrue(' },
-    @{ Key = 'Should().BeEquivalentTo' ; Value = 'ShouldBe' },
+    @{ Key = 'Should().BeEquivalentTo' ; Value = 'ShouldBeEquivalentTo' },
     @{ Key = 'Should().BeFalse(' ; Value = 'ShouldBeFalse(' },
     @{ Key = 'Should().BeSameAs(' ; Value = 'ShouldBeSameAs(' },
     @{ Key = 'Should().NotBeSameAs(' ; Value = 'ShouldNotBeSameAs(' },
@@ -67,8 +67,8 @@ $mapping = @(
     @{ Key = 'Should().NotBeNullOrWhiteSpace' ; Value = 'ShouldNotBeNullOrWhiteSpace' },
     @{ Key = 'Should().MatchRegex' ; Value = 'ShouldMatch' },
     @{ Key = 'Should().BeNull' ; Value = 'ShouldBeNull' },
-    @{ Key = 'Should().OnlyContain('; Value = 'ShouldAllBe('},
-    @{ Key = 'Should().BeGreaterOrEqualTo('; Value = 'ShouldBeGreaterThanOrEqualTo('},
+    @{ Key = 'Should().OnlyContain('; Value = 'ShouldAllBe(' },
+    @{ Key = 'Should().BeGreaterOrEqualTo('; Value = 'ShouldBeGreaterThanOrEqualTo(' },
     
     # String assertions
     @{ Key = 'Should().StartWith(' ; Value = 'ShouldStartWith(' },
@@ -189,11 +189,20 @@ function Convert-WithMessage {
         [string]$content
     )
     $patterns = @(
-        @{ Pattern = 'await\s+(\w+)\.ShouldThrowAsync<([^>]+)>\(\)\s*\.\s*WithMessage\("([^"]+)"\)' ; Replacement = 'var ex = await $1.ShouldThrowAsync<$2>(); ex.Message.ShouldBe("$3");' },
-        @{ Pattern = '(\w+)\.ShouldThrow<([^>]+)>\(\)\s*\.\s*WithMessage\("([^"]+)"\)' ; Replacement = 'var ex = await $1.ShouldThrow<$2>(); ex.Message.ShouldBe("$3");' },
-        @{ Pattern = '(\w+)\.ShouldThrow<([^>]+)>\(\)\s*\.\s*WithMessage\(\$"([^"]+)"\)' ; Replacement = 'var ex = await $1.ShouldThrow<$2>(); ex.Message.ShouldBe("$3");' },
-        @{ Pattern = 'await\s+(\w+)\.ShouldThrowAsync<([^>]+)>\(\)' ; Replacement = 'var ex = await $1.ShouldThrowAsync<$2>();' },
-        @{ Pattern = '(\w+)\.ShouldThrow<([^>]+)>\(\)' ; Replacement = '$1.ShouldThrow<$2>()' }
+        # Async with Wildcards: await subject.ShouldThrowAsync<T>().WithMessage("*msg*")
+        @{ Pattern = 'await\s+([\w\.\(\)]+)\.ShouldThrowAsync<([^>]+)>\(\)\s*\.\s*WithMessage\("\*([^"]+)\*"\)' ; Replacement = 'var ex = await $1.ShouldThrowAsync<$2>(); ex.Message.ShouldBe("$3");' },
+        
+        # Async Normal: await subject.ShouldThrowAsync<T>().WithMessage("msg")
+        @{ Pattern = 'await\s+([\w\.\(\)]+)\.ShouldThrowAsync<([^>]+)>\(\)\s*\.\s*WithMessage\("([^"]+)"\)' ; Replacement = 'var ex = await $1.ShouldThrowAsync<$2>(); ex.Message.ShouldBe("$3");' },
+
+        # Sync with Wildcards: subject.ShouldThrow<T>().WithMessage("*msg*")
+        @{ Pattern = '([\w\.\(\)]+)\.ShouldThrow<([^>]+)>\(\)\s*\.\s*WithMessage\("\*([^"]+)\*"\)' ; Replacement = 'var ex = $1.ShouldThrow<$2>(); ex.Message.ShouldBe("$3");' },
+
+        # Sync Normal: subject.ShouldThrow<T>().WithMessage("msg")
+        @{ Pattern = '([\w\.\(\)]+)\.ShouldThrow<([^>]+)>\(\)\s*\.\s*WithMessage\("([^"]+)"\)' ; Replacement = 'var ex = $1.ShouldThrow<$2>(); ex.Message.ShouldBe("$3");' },
+
+        # Sync with Interpolated String: subject.ShouldThrow<T>().WithMessage($"msg")
+        @{ Pattern = '([\w\.\(\)]+)\.ShouldThrow<([^>]+)>\(\)\s*\.\s*WithMessage\(\$"([^"]+)"\)' ; Replacement = 'var ex = $1.ShouldThrow<$2>(); ex.Message.ShouldBe($"$3");' }
     )
 
     foreach ($pattern in $patterns) {
@@ -226,6 +235,42 @@ function Convert-ContainSingleWhichMessage {
     return $content
 }
 
+# Function to replace .Should<T>().BeNull() with .ShouldBeNull<T>()
+function Convert-GenericShouldBeNull {
+    param (
+        [string]$content
+    )
+    $pattern = '\.Should<([^>]+)>\(\)\s*\.\s*BeNull\(\)'
+    $replacement = '.ShouldBeNull<$1>()'
+    return [regex]::Replace($content, $pattern, $replacement)
+}
+
+# Function to replace WithStrictOrdering with ShouldBe
+function Convert-WithStrictOrdering {
+    param (
+        [string]$content
+    )
+    # Matches .ShouldBeEquivalentTo(expected, options => options.WithStrictOrdering())
+    # Note: Should().BeEquivalentTo is already mapped to ShouldBeEquivalentTo by the simple mapping
+    $pattern = '\.ShouldBeEquivalentTo\((.+?),\s*(\w+)\s*=>\s*\2\.WithStrictOrdering\(\)\)'
+    $replacement = '.ShouldBe($1)'
+    return [regex]::Replace($content, $pattern, $replacement)
+}
+
+# Function to replace dictionary.Values.ShouldAllBeUnique() with distinct count check
+function Convert-DictionaryValuesUnique {
+    param (
+        [string]$content
+    )
+    # Matches something.Values.ShouldAllBeUnique()
+    # Note: Should().OnlyHaveUniqueItems() is already mapped to ShouldAllBeUnique() by the simple mapping
+    # SAFETY: We rely on the '.Values' property access to identify Dictionaries. 
+    # Lists and Arrays don't have a .Values property, so this won't affect them.
+    $pattern = '([\w\.]+)\.Values\.ShouldAllBeUnique\(\)'
+    $replacement = '$1.Values.Distinct().Count().ShouldBe($1.Values.Count)'
+    return [regex]::Replace($content, $pattern, $replacement)
+}
+
 # Get all C# files in the solution
 $files = Get-ChildItem -Path $SolutionPath.Directory -Recurse -Include *.cs
 
@@ -254,6 +299,15 @@ foreach ($file in $files) {
 
     # Replace ContainSingle().Which.Exception.Message.ShouldBe
     $content = Convert-ContainSingleWhichMessage -content $content
+
+    # Replace .Should<T>().BeNull() with .ShouldBeNull<T>()
+    $content = Convert-GenericShouldBeNull -content $content
+
+    # Replace .Should().BeEquivalentTo(..., options => options.WithStrictOrdering()) with .ShouldBe(...)
+    $content = Convert-WithStrictOrdering -content $content
+
+    # Replace .Values.ShouldAllBeUnique() with .Values.Distinct().Count().ShouldBe(.Values.Count)
+    $content = Convert-DictionaryValuesUnique -content $content
 
     # Remove duplicate using statements
     $content = Remove-DuplicateUsings -content $content
