@@ -83,7 +83,7 @@ $mapping = @(
     @{ Key = 'Should().HaveSameCount(' ; Value = 'Count.ShouldBe(' },
     @{ Key = 'Should().AllBe(' ; Value = 'ShouldAllBe(' },
     @{ Key = 'Should().Contain().Which.' ; Value = 'ShouldContain(item => item.' },
-    @{ Key = 'Should().ContainSingle(' ; Value = 'ShouldContainSingle(' },
+    @{ Key = 'Should().ContainSingle(' ; Value = 'ShouldHaveSingleItem(' },
     
     # Dictionary assertions
     @{ Key = 'Should().ContainKeyAndValue(' ; Value = 'ShouldContainKeyAndValue(' },
